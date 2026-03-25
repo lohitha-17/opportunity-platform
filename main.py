@@ -1,8 +1,17 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from pydantic import BaseModel
-from datetime import date
+from sqlalchemy.orm import Session
+from database import SessionLocal, OpportunityRecord, create_tables
 
 app = FastAPI()
+create_tables()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 VALID_STATES = ["TX", "OK", "KS", "AR", "NM", "LA"]
 VALID_NAICS = [236, 237, 238]
@@ -18,8 +27,29 @@ class Opportunity(BaseModel):
     days_until_response: int
     sow_match: str
 
+@app.get("/")
+def home():
+    return {"message": "Opportunity Platform is running"}
+
+@app.get("/opportunities")
+def get_opportunities(db: Session = Depends(get_db)):
+    records = db.query(OpportunityRecord).all()
+    return [
+        {
+            "id": r.id,
+            "name": r.name,
+            "state": r.state,
+            "naics_code": r.naics_code,
+            "opportunity_type": r.opportunity_type,
+            "dollar_amount": r.dollar_amount,
+            "score": r.score,
+            "recommendation": r.result
+        }
+        for r in records
+    ]
+
 @app.post("/score")
-def score_opportunity(opportunity: Opportunity):
+def score_opportunity(opportunity: Opportunity, db: Session = Depends(get_db)):
 
     # Stage 1 — Hard Gates
     if opportunity.state not in VALID_STATES:
@@ -46,32 +76,46 @@ def score_opportunity(opportunity: Opportunity):
     # Stage 2 — Scoring
     score = 0
 
-    # SOW match — 40 points
     if opportunity.sow_match.lower() == "strong":
         score += 40
     elif opportunity.sow_match.lower() == "partial":
         score += 20
 
-    # Dollar magnitude — 30 points
     if 1000000 <= opportunity.dollar_amount <= 5000000:
         score += 30
     elif opportunity.dollar_amount < 1000000:
         score += 10
 
-    # Calendar days — 20 points
     if opportunity.calendar_days >= 250:
         score += 20
     elif opportunity.calendar_days >= 150:
         score += 10
 
-    # Response date — 10 points
     if opportunity.days_until_response >= 10:
         score += 10
+
+    result = "BID" if score >= 60 else "NO BID"
+
+    # Save to database
+    record = OpportunityRecord(
+        name=opportunity.name,
+        state=opportunity.state,
+        naics_code=opportunity.naics_code,
+        opportunity_type=opportunity.opportunity_type,
+        dollar_amount=opportunity.dollar_amount,
+        calendar_days=opportunity.calendar_days,
+        days_until_response=opportunity.days_until_response,
+        sow_match=opportunity.sow_match,
+        score=score,
+        result=result
+    )
+    db.add(record)
+    db.commit()
 
     return {
         "opportunity": opportunity.name,
         "score": score,
-        "result": "BID" if score >= 60 else "NO BID",
+        "result": result,
         "breakdown": {
             "sow_match": opportunity.sow_match,
             "dollar_amount": opportunity.dollar_amount,
