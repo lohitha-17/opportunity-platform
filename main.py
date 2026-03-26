@@ -2,11 +2,14 @@ from fastapi import FastAPI, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from database import SessionLocal, OpportunityRecord, create_tables
-
+from sam_integration import fetch_opportunities
+from dotenv import load_dotenv
+load_dotenv()
 app = FastAPI()
 create_tables()
 
 def get_db():
+
     db = SessionLocal()
     try:
         yield db
@@ -26,7 +29,9 @@ class Opportunity(BaseModel):
     calendar_days: int
     days_until_response: int
     sow_match: str
-
+@app.get("/fetch-opportunities")
+def get_sam_opportunities(naics_code: str = "237", limit: int = 10):
+    return fetch_opportunities(naics_code=naics_code, limit=limit)
 @app.get("/")
 def home():
     return {"message": "Opportunity Platform is running"}
