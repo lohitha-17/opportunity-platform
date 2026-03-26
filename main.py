@@ -32,6 +32,86 @@ class Opportunity(BaseModel):
 @app.get("/fetch-opportunities")
 def get_sam_opportunities(naics_code: str = "237", limit: int = 10):
     return fetch_opportunities(naics_code=naics_code, limit=limit)
+
+@app.post("/auto-score")
+def auto_score_from_sam(
+    naics_code: str = "237",
+    limit: int = 10,
+    db: Session = Depends(get_db)
+):
+    # Step 1 — Fetch from SAM.gov
+    sam_data = fetch_opportunities(naics_code=naics_code, limit=limit)
+    
+    results = []
+    
+    for opp in sam_data.get("opportunities", []):
+        # Step 2 — Build opportunity object
+        state = opp.get("state") or "TX"
+        opp_type = opp.get("type", "").lower()
+        
+        if "presolicitation" in opp_type:
+            opp_type = "pre-solicitation"
+        elif "sources sought" in opp_type:
+            opp_type = "source sought"
+
+        # Step 3 — Run through hard gates
+        if state not in VALID_STATES:
+            results.append({
+                "title": opp.get("title"),
+                "state": state,
+                "result": "NO BID",
+                "reason": f"State {state} outside footprint"
+            })
+            continue
+
+        if opp_type not in VALID_TYPES:
+            results.append({
+                "title": opp.get("title"),
+                "state": state,
+                "result": "NO BID",
+                "reason": f"Type '{opp_type}' not pursued"
+            })
+            continue
+
+        # Step 4 — Score it
+        score = 0
+        dollar = opp.get("dollar_amount", 2000000)
+
+        if 1000000 <= dollar <= 5000000:
+            score += 30
+        score += 40  # assume strong SOW match for auto-scoring
+        score += 20  # assume enough calendar days
+        score += 10  # assume enough response time
+
+        result = "BID" if score >= 60 else "NO BID"
+
+        # Step 5 — Save to database
+        record = OpportunityRecord(
+            name=opp.get("title", "Unknown"),
+            state=state,
+            naics_code=int(naics_code),
+            opportunity_type=opp_type,
+            dollar_amount=dollar,
+            calendar_days=300,
+            days_until_response=15,
+            sow_match="strong",
+            score=score,
+            result=result
+        )
+        db.add(record)
+        db.commit()
+
+        results.append({
+            "title": opp.get("title"),
+            "state": state,
+            "score": score,
+            "result": result
+        })
+
+    return {
+        "total_processed": len(results),
+        "results": results
+    }
 @app.get("/")
 def home():
     return {"message": "Opportunity Platform is running"}
