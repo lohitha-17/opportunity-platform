@@ -26,3 +26,8 @@ jobs:
       run: pytest test_main.py -v
       env:
         DATABASE_URL: sqlite:///./test.db
+
+    - name: Install dependencies
+      run: |
+        pip install fastapi uvicorn pydantic pytest httpx sqlalchemy psycopg2-binary requests python-dotenv
+    
