@@ -4,6 +4,12 @@ from sqlalchemy.orm import Session
 from database import SessionLocal, OpportunityRecord, create_tables
 from sam_integration import fetch_opportunities
 from dotenv import load_dotenv
+from nlp_analyzer import analyze_rfp
+
+class RFPDocument(BaseModel):
+    text: str
+
+
 load_dotenv()
 app = FastAPI()
 create_tables()
@@ -32,7 +38,10 @@ class Opportunity(BaseModel):
 @app.get("/fetch-opportunities")
 def get_sam_opportunities(naics_code: str = "237", limit: int = 10):
     return fetch_opportunities(naics_code=naics_code, limit=limit)
-
+@app.post("/analyze-rfp")
+def analyze_rfp_document(document: RFPDocument):
+    result = analyze_rfp(document.text)
+    return result
 @app.post("/auto-score")
 def auto_score_from_sam(
     naics_code: str = "237",
